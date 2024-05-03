@@ -23,6 +23,8 @@ public class DefaultTransformFilterChain implements TransformFilterChain{
         }
     }
 
+
+    //释放资源
     @Override
     public void release() {
         for (int i = 0; i < this.n; i ++) {

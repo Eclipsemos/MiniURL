@@ -73,6 +73,7 @@ public class UrlMapCacheManager {
 
         HashOperations<String, String, String> hashOperations = stringRedisTemplate.opsForHash();
         String hv = hashOperations.get(CacheKeyEnum.ACCESS_CODE_HASH.getKey(), compressionCode);
+        //查不到就去查DB
         UrlMapDO urlMapDO = StringUtils.isNotEmpty(hv) ? new Gson().fromJson(hv, UrlMapDO.class) : loadUrlMapFromDb(compressionCode);
         return Objects.isNull(urlMapDO) ? null : urlMapDO;
     }
