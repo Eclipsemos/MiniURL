@@ -38,6 +38,7 @@ public class UrlMapController {
      * @param longByShortQry
      * @return
      */
+    @PostMapping("/getlong")
     public SingleResponse<UrlMapDTO> getLongByShort(@RequestBody LongByShortQry longByShortQry) {
         return urlMapService.getLongByShort(longByShortQry);
     }
