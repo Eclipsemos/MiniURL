@@ -31,7 +31,7 @@ docker-compose up -d
  mvn springboot:run
 ```
 
-# 业务流程
+## 业务流程 1：长链传入，短链创建
 ### 长链传入 (适配器层)
 - 长链接以Json封装形势发送到 ```localhost:8080/api/create```
 - UrlMapController的方法createUrlMap收到请求并且把请求封装成ServerWebExchange和UrlMapAddCmd两部分
@@ -77,3 +77,19 @@ private UrlMapDTOAssembler urlMapDTOAssembler; //注入应用层的装配器
 - 在生成完62进制压缩码后，使用布隆过滤器(fpp=0.00001,误判率越低，布隆过滤器内部使用的位数组就越大)检查是否刚生产的压缩吗可能在，如果可能在，就不断生成直到不在为止。接着把刚生产的放入到布隆过滤器中。
 - 返回SequenceAndCodeDO结果（包含了10进制的Squence和62进制的CompressionCode）
 - generateBatchCompressionCode收到生成的SequenceAndCodeDO结果后设置compressionCodeDO，并且使用网关compressionCodeGateway（基础设施层）插入生成的compressionCodeDO到数据库表compression_code中
+- 回到领域层的createURL中，首先检查获得的compressionCodeDO是否合法，然后再生成短链（即protocol://domain//compressionCode)
+- 调用saveUrlMapAndUpdateCompressCode方法来写入到基础设施层中的数据表url_map和compression_code.
+- 调用urlMapCacheManager的方法refreshUrlMapCache刷新到插入结果到缓存中. 该阶段把对象（key,field,value）存入Redis中。
+- 准备解锁，先判断当前线程是否有锁。
+- 完成短链创建。
+
+## 业务流程 2：长链重定向
+### 获得短链访问请求（适配器层）
+- compressionCode作为RESTful的请求直接被DispatchController接收到，并且将其分为两部分：ServerWebExchange以及String类型的compressionCode。
+- 把刚刚获得的两部分封装到dispatchQry中，并且传入并且调用应用层的dispatchService的dispatch方法
+- 和业务1一样，应用层的dispatchService是在应用层内的DispatchServiceImpl实现，并且调用了执行器dispatchQryExe来执行dispatchQry。
+- DispatchQryExe执行器中注入了领域层UrlMapDomainService和领域层WebFluxServerResponseWriter
+- 其中execute方法的类型是```Mono<Void>```，代该操作异步执行。
+- 首先调用generateTransformContext填充一个TransformContext的上下文（把exchange内的request内的headers提取，使用```Set<String>```获取请求头Key的合集，并且一个个赋值到context中的header中去）
+- 接下来执行器会调用领域层的UrlMapDomainService的方法processTransform处理刚刚获得的上下文context
+- processTransform首先构造了过滤器链

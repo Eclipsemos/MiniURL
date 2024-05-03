@@ -52,7 +52,9 @@ public class UrlMapCacheManager {
             return ;
         }
 
+        //Insert the object to the Redis
         HashOperations<String, String, String> hashOperations = stringRedisTemplate.opsForHash();
+        // HashTable:ezlink:access:code:hash   Key: CompressionCode,  Value:  Json urlMapDO
         hashOperations.put(CacheKeyEnum.ACCESS_CODE_HASH.getKey(), urlMapDO.getCompressionCode(), new Gson().toJson(urlMapDO));
     }
 
