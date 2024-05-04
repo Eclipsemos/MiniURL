@@ -88,9 +88,11 @@ private UrlMapDTOAssembler urlMapDTOAssembler; //注入应用层的装配器
 - compressionCode作为RESTful的请求直接被DispatchController接收到，并且将其分为两部分：ServerWebExchange以及String类型的compressionCode。
 - 把刚刚获得的两部分封装到dispatchQry中，并且传入并且调用应用层的dispatchService的dispatch方法
 - 和业务1一样，应用层的dispatchService是在应用层内的DispatchServiceImpl实现，并且调用了执行器dispatchQryExe来执行dispatchQry。
+### 执行器（应用层）
 - DispatchQryExe执行器中注入了领域层UrlMapDomainService和领域层WebFluxServerResponseWriter
 - 其中execute方法的类型是```Mono<Void>```，代该操作异步执行。
 - 首先调用generateTransformContext填充一个TransformContext的上下文（把exchange内的request内的headers提取，使用```Set<String>```获取请求头Key的合集，并且一个个赋值到context中的header中去）
+### 处理上下文（领域层）
 - 接下来执行器会调用领域层的UrlMapDomainService的方法processTransform处理刚刚获得的上下文context。
 - processTransform首先构造了过滤器链（责任链模式），使用 Spring Framework 的功能来动态查找和获取所有实现了 TransformFilter 接口的 bean 实例，将其存入TransformFilterInstance的List数组。
 - 对刚刚获得的```List<TransformFilterInstance>```进行排序（按照每个实现类的getOrder从大到小），使用BaseNamingTransformFilter(没有@Component标注)封装过滤器，初始化过程包括重写其filterName方法。
@@ -100,4 +102,7 @@ private UrlMapDTOAssembler urlMapDTOAssembler; //注入应用层的装配器
 - 第二个过滤器：UrlTransformFilter：短链转换，根据前端传入的 compressionCode 找到映射记录，如果能够成功找到，那么将 TransformContext 的 transformStatus 字段设为 TRANSFORM_SUCCESS，同时将短链和长链也存到 TransformContext 的 ```Map<String, Object> params``` 字段中。这其中是直接去缓存中查找映射记录（因为之前长链和短链已经写入了redis缓存中。该阶段首先查看布隆过滤器防止缓存穿透，接着使用查询redis中的哈希表获得value（UrlMapDo类型）。如果redis中查不到，就去使用网关查询基础设施层中的DB，查不到返回null，查到返回。
 - 第三个过滤器：RedirectionTransformFilter：赋值 redirection 字段，同时修改 TransformContext 的 transformStatus 字段为 REDIRECTION_SUCCESS（重定向成功）
 - 第四个过滤器:TransformEventProcessTransformFilter：如果 TransformContext 的 transformStatus 字段为 REDIRECTION_SUCCESS，说明重定向成功，那么我们需要记录下这次的重定向日志到数据库表 transform_event_record 中，记录短链、长链、重定向时间、用户 IP 等。这里创建好插入的消息后，并没有实时的进行，而是发送了一条Kafka的消息，其消费者在适配器层中的TransformEventConsumer。
+### 异步操作执行（应用层）
 - 过滤器链执行完毕，回到应用层，执行构造好的TTL(publishOn(Schedulers.parallel()) 这一行的作用是确保 Mono.fromRunnable(context.getRedirectAction()) 后续的操作（如 doOnSuccess）在一个并行的线程上执行，而不是在当前线程或调用者的线程上)。
+
+## 业务流程 3: 接口限流
