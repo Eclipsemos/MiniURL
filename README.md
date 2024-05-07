@@ -100,9 +100,22 @@ private UrlMapDTOAssembler urlMapDTOAssembler; //注入应用层的装配器
 - 接着使用过滤器链处理上下文。在过滤器链中，按顺序执行
 - 第一个过滤器：ExtractRequestHeaderTransformFilter：提取请求头中的一些参数如 User-Agent、Cookie、ClientId、IP 存到 TransformContext 的 ```Map<String, Object> params``` 字段中
 - 第二个过滤器：UrlTransformFilter：短链转换，根据前端传入的 compressionCode 找到映射记录，如果能够成功找到，那么将 TransformContext 的 transformStatus 字段设为 TRANSFORM_SUCCESS，同时将短链和长链也存到 TransformContext 的 ```Map<String, Object> params``` 字段中。这其中是直接去缓存中查找映射记录（因为之前长链和短链已经写入了redis缓存中。该阶段首先查看布隆过滤器防止缓存穿透，接着使用查询redis中的哈希表获得value（UrlMapDo类型）。如果redis中查不到，就去使用网关查询基础设施层中的DB，查不到返回null，查到返回。
-- 第三个过滤器：RedirectionTransformFilter：赋值 redirection 字段，同时修改 TransformContext 的 transformStatus 字段为 REDIRECTION_SUCCESS（重定向成功）
+- 第三个过滤器：RedirectionTransformFilter：赋值 redirection 字段，同时修改 TransformContext 的 transformStatus 字段为 REDIRECTION_SUCCESS（重定向成功），这里是核心功能实现，通过springwebflux
 - 第四个过滤器:TransformEventProcessTransformFilter：如果 TransformContext 的 transformStatus 字段为 REDIRECTION_SUCCESS，说明重定向成功，那么我们需要记录下这次的重定向日志到数据库表 transform_event_record 中，记录短链、长链、重定向时间、用户 IP 等。这里创建好插入的消息后，并没有实时的进行，而是发送了一条Kafka的消息，其消费者在适配器层中的TransformEventConsumer。
 ### 异步操作执行（应用层）
 - 过滤器链执行完毕，回到应用层，执行构造好的TTL(publishOn(Schedulers.parallel()) 这一行的作用是确保 Mono.fromRunnable(context.getRedirectAction()) 后续的操作（如 doOnSuccess）在一个并行的线程上执行，而不是在当前线程或调用者的线程上)。
 
 ## 业务流程 3: 接口限流
+### 实现结果
+- 当前接口的全局性限流（1分钟内访问100次）
+- 针对某一IP地址的限流，例如某个IP地址可以在1分钟内访问100次
+### 实现过程：限流注解和Lua脚本
+- 创建枚举类来方便分开创建限流类型
+- 定制 RedisTemplate（使用 Spring Data Redis 来操作 Redis 的时候，默认的 RedisTemplate 有一个小坑，就是序列化用的是 JdkSerializationRedisSerializer，直接用这个序列化工具将来存到 Redis 上的 key 和 value 都会莫名其妙多一些前缀，导致你用命令读取的时候可能会出错。所以我们需要修改 RedisTemplate 的序列化方案：修改 RedisTemplate 序列化方案）
+- Lua脚本：用来处理Redis中的一些原子性操作，直接在 Java 代码中将 Lua 脚本定义好，然后发送到 Redis 服务端去执行。为什么Redis Lua是原子性的？（Lua 脚本在 Redis 中通常被用来处理原子性操作的原因是，当 Redis 执行一个 Lua 脚本时，它会将整个脚本作为一个单独的执行单元来处理。这意味着在 Lua 脚本执行的过程中，不会有其他 Redis 命令或脚本插入执行，从而保证了脚本中所有操作的原子性。这是因为 Redis 是单线程的，所以在执行 Lua 脚本的过程中，Redis 不会进行上下文切换来执行其他命令。）
+
+## 业务流程 4: Dubbo RPC
+- 服务消费者只需要引入 client 这个 jar 包，就可以通过 RPC 调用 UrlMapService 中定义的方法了。
+
+## 业务流程 5: 访问统计
+- 在 DDD 架构中，对外的 job 一般放在 adaptar 层来写,定时任务框架就直接采用 Spring Scheduled。

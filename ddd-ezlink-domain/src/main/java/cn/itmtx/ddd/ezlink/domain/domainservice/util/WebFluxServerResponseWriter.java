@@ -61,6 +61,7 @@ public class WebFluxServerResponseWriter {
     public Runnable redirectAction(ServerWebExchange exchange, String url) {
         return () -> {
             ServerHttpResponse response = exchange.getResponse();
+            //设置重定向状态码
             response.setStatusCode(HttpStatus.FOUND);
             response.getHeaders().setLocation(URI.create(url));
             response.getHeaders().set(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, ALL);
